@@ -1,7 +1,7 @@
 import { useState } from 'react'
-import { Wallpaper } from '../types'
 import outerWilds02 from '../assets/img/outerWilds02.jpg'
 import outerWilds from '../assets/img/outerWilds.jpg'
+import { Wallpaper } from '../utils/types'
 
 const WALLPAPER_STORAGE_KEY = '@monitor:wallpaper'
 

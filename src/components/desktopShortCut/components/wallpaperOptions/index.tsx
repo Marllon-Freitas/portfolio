@@ -1,11 +1,11 @@
 import React from 'react'
-import { Wallpaper } from '../../../../types'
 import {
   WallpaperOptionsContainer,
   WallpaperItem,
   WallpaperImage,
   WallpaperName
 } from './styled'
+import { Wallpaper } from '../../../../utils/types'
 
 interface WallpaperOptionsProps {
   wallpapers: Wallpaper[]
