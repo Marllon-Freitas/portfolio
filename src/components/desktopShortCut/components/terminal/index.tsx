@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Input,
   InputContainer,
@@ -7,22 +7,43 @@ import {
 } from './styled'
 import {
   AVAILABLE_COMMANDS,
-  fileSystem,
   TERMINAL_COLORS
 } from '../../../../utils/constants'
-import { FileSystem } from '../../../../utils/types'
+import { useFileSystem } from '../../../../filesystem/FileSystemContext'
+
+function resolvePath(currentPath: string, newPath: string): string {
+  if (newPath.startsWith('C:') || newPath.startsWith('c:')) return newPath
+
+  const parts = newPath.replace(/\//g, '\\').split('\\')
+  const resolved = currentPath.split('\\')
+
+  for (const part of parts) {
+    if (part === '..') {
+      resolved.pop()
+    } else if (part !== '.') {
+      resolved.push(part)
+    }
+  }
+
+  return resolved.join('\\')
+}
 
 const Terminal: React.FC = () => {
-  const [currentPath, setCurrentPath] = useState('C:\\marllon\\portfolio')
+  const fs = useFileSystem()
+
+  const [currentPath, setCurrentPath] = useState('C:\\marllon')
   const [inputHistory, setInputHistory] = useState<string[]>([
-    'Welcome to the Terminal! Type "help" for available commands.'
+    'Microsoft(R) Windows 98',
+    '(C)Copyright Microsoft Corp 1981-1999.',
+    '',
+    'Welcome! Type "help" for available commands.'
   ])
   const [currentInput, setCurrentInput] = useState('')
   const [historyIndex, setHistoryIndex] = useState<number | null>(null)
   const [commandHistory, setCommandHistory] = useState<string[]>([])
-  const [showAutoComplete, setShowAutoComplete] = useState(false)
   const [textColor, setTextColor] = useState('white')
   const [backgroundColor, setBackgroundColor] = useState('black')
+
   const terminalRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -32,207 +53,184 @@ const Terminal: React.FC = () => {
     }
   }, [inputHistory])
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        showAutoComplete &&
-        !terminalRef.current?.contains(event.target as Node)
-      ) {
-        setShowAutoComplete(false)
-      }
-    }
+  const getAutoCompleteOptions = useCallback(
+    (input: string): string[] => {
+      const options: string[] = []
+      const parts = input.trim().split(' ')
 
-    document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
-  }, [showAutoComplete])
-
-  const getAutoCompleteOptions = (input: string) => {
-    const currentDir = navigateToPath(fileSystem, currentPath)
-    const options: string[] = []
-
-    if (!input.includes(' ')) {
-      options.push(
-        ...AVAILABLE_COMMANDS.filter((cmd) =>
+      if (parts.length === 1) {
+        return AVAILABLE_COMMANDS.filter((cmd) =>
           cmd.startsWith(input.toLowerCase())
         )
-      )
-    }
-
-    if (
-      input.toLowerCase().startsWith('cd ') ||
-      input.toLowerCase().startsWith('type ')
-    ) {
-      const partialPath = input.split(' ')[1] || ''
-      if (
-        currentDir &&
-        currentDir.type === 'directory' &&
-        currentDir.children
-      ) {
-        options.push(
-          ...Object.keys(currentDir.children).filter((name) =>
-            name.toLowerCase().startsWith(partialPath.toLowerCase())
+      }
+      const cmd = parts[0].toLowerCase()
+      if (['cd', 'type', 'mkdir', 'del'].includes(cmd)) {
+        const partial = parts[1] || ''
+        const entries = fs.listDir(currentPath) ?? []
+        return entries
+          .map((e) => e.name)
+          .filter((name) =>
+            name.toLowerCase().startsWith(partial.toLowerCase())
           )
-        )
       }
-    }
 
-    return options
-  }
+      return options
+    },
+    [currentPath, fs]
+  )
 
-  const processCommand = (command: string) => {
-    if (!command.trim()) return ''
+  const processCommand = useCallback(
+    (command: string): string | null => {
+      const trimmed = command.trim()
+      if (!trimmed) return null
 
-    setCommandHistory((prev) => [...prev, command])
+      setCommandHistory((prev) => [...prev, trimmed])
 
-    const parts = command.trim().split(' ')
-    const cmd = parts[0].toLowerCase()
-    const args = parts.slice(1)
+      const parts = trimmed.split(' ')
+      const cmd = parts[0].toLowerCase()
+      const args = parts.slice(1)
 
-    let output = ''
+      switch (cmd) {
+        case 'dir': {
+          const entries = fs.listDir(currentPath)
+          if (!entries) return 'Invalid path.'
 
-    switch (cmd) {
-      case 'dir': {
-        output = 'Directory of ' + currentPath + '\n\n'
-        const currentDir = navigateToPath(fileSystem, currentPath)
-        if (
-          currentDir &&
-          currentDir.type === 'directory' &&
-          currentDir.children
-        ) {
-          for (const [name, item] of Object.entries(currentDir.children)) {
-            output += `${item.type === 'directory' ? '<DIR>' : '     '} ${name}\n`
-          }
-        }
-        break
-      }
-      case 'cd':
-        if (args.length === 0) {
-          output = currentPath
-        } else {
-          const newPath = args[0]
-          const resolvedPath = resolvePath(currentPath, newPath)
-          const targetDir = navigateToPath(fileSystem, resolvedPath)
-          if (targetDir && targetDir.type === 'directory') {
-            setCurrentPath(resolvedPath)
-            output = ''
+          let out = ` Directory of ${currentPath}\n\n`
+          if (entries.length === 0) {
+            out += '        File Not Found\n'
           } else {
-            output = `The system cannot find the path specified.`
-          }
-        }
-        break
-      case 'cls':
-        setInputHistory([''])
-        return
-      case 'help':
-        output = `
-          Available commands:
-            dir     - List directory contents
-            cd      - Change directory or show current directory
-            cls     - Clear screen
-            help    - Show this help message
-            type    - Display content of a text file
-            echo    - Display a message
-            exit    - Exit the terminal
-            color   - Change text and background color
+            const dirs = entries.filter((e) => e.node.type === 'dir')
+            const files = entries.filter((e) => e.node.type === 'file')
 
-          Tips:
-            - Use Tab for command/path autocompletion
-            - Use Up/Down arrows to navigate command history
-            - Press Ctrl+L to clear screen
-            - Use ".." to navigate to parent directory`
-        break
-      case 'type':
-        if (args.length === 0) {
-          output = 'The syntax of the command is incorrect.'
-        } else {
+            for (const { name, node } of [...dirs, ...files]) {
+              const date = new Date(node.created).toLocaleDateString('en-US', {
+                month: '2-digit',
+                day: '2-digit',
+                year: '2-digit'
+              })
+              const isDir = node.type === 'dir'
+              const size = isDir
+                ? '      <DIR>'
+                : `${String(node.content.length).padStart(10)} `
+              out += `${date}  ${size}  ${name}\n`
+            }
+
+            const fileCount = files.length
+            const dirCount = dirs.length
+            out += `\n         ${fileCount} File(s)\n         ${dirCount} Dir(s)`
+          }
+          return out
+        }
+        case 'cd': {
+          if (args.length === 0) return currentPath
+          if (args[0] === '/') {
+            setCurrentPath('C:\\')
+            return null
+          }
+          const resolved = resolvePath(currentPath, args[0])
+          const node = fs.getNode(resolved)
+          if (node?.type === 'dir') {
+            setCurrentPath(resolved)
+            return null
+          }
+          return 'The system cannot find the path specified.'
+        }
+        case 'cls':
+          setInputHistory([])
+          return null
+        case 'mkdir':
+        case 'md': {
+          if (!args[0]) return 'The syntax of the command is incorrect.'
+          const newPath = resolvePath(currentPath, args[0])
+          if (fs.exists(newPath))
+            return 'A subdirectory or file already exists.'
+          fs.mkdir(newPath)
+          return null
+        }
+        case 'del':
+        case 'rm': {
+          if (!args[0]) return 'The syntax of the command is incorrect.'
+          const target = resolvePath(currentPath, args[0])
+          if (!fs.exists(target)) return 'File Not Found.'
+          fs.deleteNode(target)
+          return null
+        }
+        case 'type': {
+          if (!args[0]) return 'The syntax of the command is incorrect.'
           const filePath = resolvePath(currentPath, args[0])
-          const file = navigateToPath(fileSystem, filePath)
-          if (file && file.type === 'file' && file.content) {
-            output = file.content
-          } else {
-            output = 'File not found.'
-          }
+          const content = fs.readFile(filePath)
+          if (content === null)
+            return 'The system cannot find the file specified.'
+          return content
         }
-        break
-      case 'echo':
-        output = args.join(' ')
-        break
-      case 'color':
-        if (args.length === 0) {
-          output = 'The syntax of the command is incorrect.'
-        } else {
-          const colorCode = args[0].toUpperCase() as string
-          const firstChar = colorCode[0] as keyof typeof TERMINAL_COLORS
-          const secondChar = colorCode[1] as keyof typeof TERMINAL_COLORS
+        case 'echo': {
+          const gtIdx = args.indexOf('>')
+          if (gtIdx !== -1) {
+            const text = args.slice(0, gtIdx).join(' ')
+            const fileName = args[gtIdx + 1]
+            if (!fileName) return 'The syntax of the command is incorrect.'
+            fs.writeFile(resolvePath(currentPath, fileName), text)
+            return null
+          }
+          return args.join(' ')
+        }
+        case 'help':
+          return `
+                Available commands:
+
+                  dir           List directory contents
+                  cd [path]     Change directory
+                  mkdir [name]  Create directory
+                  del [name]    Delete file or folder
+                  type [file]   Display file contents
+                  echo [text]   Print text (or: echo text > file)
+                  cls           Clear screen
+                  color [XY]    Change colors (e.g. color 0A)
+                  help          Show this message
+                  exit          Close terminal
+
+                Tips:
+                  Use Tab for autocomplete
+                  Use Up/Down arrows for history
+                  Use ".." to go up a directory
+                  Use Ctrl+L to clear screen`
+        case 'color': {
+          if (!args[0])
+            return `Colors: 0=black 1=blue 2=green 3=aqua 4=red 5=purple
+                    6=yellow 7=white 8=gray 9=ltblue A=ltgreen
+                    B=ltaqua C=ltred D=ltpurple E=ltyellow
+
+                    Usage: color [background][text]  e.g. color 0A`
+          const code = args[0].toUpperCase()
+          const bg = code[0] as keyof typeof TERMINAL_COLORS
+          const fg = code[1] as keyof typeof TERMINAL_COLORS
 
           if (
-            colorCode.length === 2 &&
-            TERMINAL_COLORS[firstChar] &&
-            TERMINAL_COLORS[secondChar]
+            code.length !== 2 ||
+            !TERMINAL_COLORS[bg] ||
+            !TERMINAL_COLORS[fg]
           ) {
-            setBackgroundColor(TERMINAL_COLORS[firstChar].value)
-            setTextColor(TERMINAL_COLORS[secondChar].value)
-            output = `Text color set to ${TERMINAL_COLORS[secondChar].name}, background color set to ${TERMINAL_COLORS[firstChar].name}`
-          } else {
-            output =
-              'Invalid color code. Use a valid color code (e.g., 0A, 1B, etc.).'
+            return 'Invalid color code. Example: color 0A'
           }
+          if (bg === fg) return 'Background and text color cannot be the same.'
+
+          setBackgroundColor(TERMINAL_COLORS[bg].value)
+          setTextColor(TERMINAL_COLORS[fg].value)
+          return `Colors set: background=${TERMINAL_COLORS[bg].name}, text=${TERMINAL_COLORS[fg].name}`
         }
-        break
-      case 'exit':
-        output = 'Goodbye! Closing terminal...'
-        setTimeout(() => {
-          setInputHistory((prev) => [...prev, 'Terminal session ended.'])
-          setCurrentInput('')
-          inputRef.current?.blur()
-        }, 1000)
-        break
-      default:
-        output = `'${cmd}' is not recognized as an internal or external command.`
-    }
-
-    return output
-  }
-
-  const navigateToPath = (fs: FileSystem, path: string) => {
-    const parts = path.replace('C:', '').split('\\').filter(Boolean)
-    let current = fs['C:']
-
-    for (const part of parts) {
-      if (
-        current.type === 'directory' &&
-        current.children &&
-        current.children[part]
-      ) {
-        current = current.children[part]
-      } else {
-        return null
+        case 'exit':
+          return 'Type "exit" again or close this window.'
+        default:
+          return `'${cmd}' is not recognized as an internal or external command,\noperable program or batch file.`
       }
-    }
-
-    return current
-  }
-
-  const resolvePath = (currentPath: string, newPath: string) => {
-    if (newPath.startsWith('C:')) {
-      return newPath
-    }
-    const parts = newPath.split('\\')
-    const resolvedPath = currentPath.split('\\')
-    for (const part of parts) {
-      if (part === '..') {
-        resolvedPath.pop()
-      } else if (part !== '.') {
-        resolvedPath.push(part)
-      }
-    }
-    return resolvedPath.join('\\')
-  }
+    },
+    [currentPath, fs]
+  )
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.ctrlKey && e.key === 'l') {
       e.preventDefault()
-      setInputHistory([''])
+      setInputHistory([])
       return
     }
 
@@ -247,23 +245,28 @@ const Terminal: React.FC = () => {
           setCurrentInput(options[0])
         }
       } else if (options.length > 1) {
-        setShowAutoComplete(true)
+        setInputHistory((prev) => [
+          ...prev,
+          `${currentPath}> ${currentInput}`,
+          options.join('  ')
+        ])
       }
       return
     }
 
     if (e.key === 'Enter') {
-      setShowAutoComplete(false)
       const output = processCommand(currentInput)
-      console.log('output', output)
       setInputHistory((prev) => [
         ...prev,
         `${currentPath}> ${currentInput}`,
-        ...(output ? output.split('\n') : [])
+        ...(output !== null ? output.split('\n') : [])
       ])
       setCurrentInput('')
       setHistoryIndex(null)
-    } else if (e.key === 'ArrowUp') {
+      return
+    }
+
+    if (e.key === 'ArrowUp') {
       e.preventDefault()
       if (commandHistory.length > 0) {
         const newIndex =
@@ -273,19 +276,21 @@ const Terminal: React.FC = () => {
         setHistoryIndex(newIndex)
         setCurrentInput(commandHistory[newIndex])
       }
-    } else if (e.key === 'ArrowDown') {
+      return
+    }
+
+    if (e.key === 'ArrowDown') {
       e.preventDefault()
       if (historyIndex !== null) {
         if (historyIndex < commandHistory.length - 1) {
-          setHistoryIndex(historyIndex + 1)
-          setCurrentInput(commandHistory[historyIndex + 1])
+          const newIndex = historyIndex + 1
+          setHistoryIndex(newIndex)
+          setCurrentInput(commandHistory[newIndex])
         } else {
           setHistoryIndex(null)
           setCurrentInput('')
         }
       }
-    } else if (e.key === 'Escape') {
-      setShowAutoComplete(false)
     }
   }
 
@@ -293,10 +298,10 @@ const Terminal: React.FC = () => {
     <TerminalContainer
       ref={terminalRef}
       onClick={() => inputRef.current?.focus()}
-      style={{ color: textColor, backgroundColor: backgroundColor }}
+      style={{ color: textColor, backgroundColor }}
     >
       {inputHistory.map((line, i) => (
-        <TerminalLine key={i}>{line}</TerminalLine>
+        <TerminalLine key={i}>{line || '\u00A0'}</TerminalLine>
       ))}
       <InputContainer>
         <span>{`${currentPath}>`}</span>
@@ -304,13 +309,10 @@ const Terminal: React.FC = () => {
           ref={inputRef}
           type="text"
           value={currentInput}
-          onChange={(e) => {
-            setCurrentInput(e.target.value)
-            const options = getAutoCompleteOptions(e.target.value)
-            setShowAutoComplete(options.length > 0)
-          }}
+          onChange={(e) => setCurrentInput(e.target.value)}
           onKeyDown={handleKeyDown}
           autoFocus
+          style={{ color: textColor, caretColor: textColor }}
         />
       </InputContainer>
     </TerminalContainer>

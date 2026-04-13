@@ -23,6 +23,7 @@ interface GenericWindowProps {
   style?: React.CSSProperties
   onMinimize?: () => void
   onClose?: () => void
+  onBeforeClose?: () => void
 }
 
 const GenericWindow: React.FC<GenericWindowProps> = ({
@@ -33,18 +34,27 @@ const GenericWindow: React.FC<GenericWindowProps> = ({
   onClick,
   style,
   onMinimize,
-  onClose
+  onClose,
+  onBeforeClose
 }) => {
-  const [size, setSize] = useState({ width: 400, height: 300 })
+  const [size, setSize] = useState({ width: 500, height: 380 })
   const [position, setPosition] = useState(prevPosition || { x: 100, y: 100 })
   const [isDragging, setIsDragging] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
   const [isMaximized, setIsMaximized] = useState(false)
 
   const startPos = useRef({ x: 0, y: 0 })
-  const startSize = useRef({ width: 400, height: 300 })
+  const startSize = useRef({ width: 500, height: 380 })
   const prevPos = useRef({ x: 0, y: 0 })
-  const prevSize = useRef({ width: 400, height: 300 })
+  const prevSize = useRef({ width: 500, height: 380 })
+
+  const handleClose = () => {
+    if (onBeforeClose) {
+      onBeforeClose()
+    } else {
+      onClose?.()
+    }
+  }
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!isMaximized) {
@@ -85,6 +95,7 @@ const GenericWindow: React.FC<GenericWindowProps> = ({
 
   const handleResizeMouseDown = (e: React.MouseEvent) => {
     if (!isMaximized) {
+      e.stopPropagation()
       setIsResizing(true)
       startPos.current = { x: e.clientX, y: e.clientY }
       startSize.current = { width: size.width, height: size.height }
@@ -126,15 +137,14 @@ const GenericWindow: React.FC<GenericWindowProps> = ({
     >
       <TitleBar onMouseDown={handleMouseDown} onDoubleClick={handleMaximize}>
         <TitleBarInfo>
-          <img src={icon} alt="icon" />
+          {icon && <img src={icon} alt="icon" />}
           <span>{title}</span>
         </TitleBarInfo>
         <ControlButtons>
           <Button onClick={onMinimize}>_</Button>
           <Button onClick={handleMaximize}>{isMaximized ? '🗗' : '🗖'}</Button>
-          <Button onClick={onClose}>
-            {' '}
-            <img src={windowCloseIcon} alt="Close" />{' '}
+          <Button onClick={handleClose}>
+            <img src={windowCloseIcon} alt="Close" />
           </Button>
         </ControlButtons>
       </TitleBar>

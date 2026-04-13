@@ -1,6 +1,7 @@
 import React, { useCallback, useRef, useState } from 'react'
 import folderIcon from '../../assets/icons/folder.ico'
 import cmdIcon from '../../assets/icons/cmd.png'
+import TextIcon from '../../assets/icons/notepad-1.png'
 import {
   Content,
   MonitorScreen,
@@ -11,22 +12,27 @@ import {
 import DesktopShortcut from '../desktopShortCut'
 import GenericWindow from '../desktopWindow'
 import Taskbar from '../taskBar'
-import WallpaperOptions from '../desktopShortCut/components/wallpaperOptions'
 import { useWallpaper } from '../../hooks/useWallpaper'
 import Terminal from '../desktopShortCut/components/terminal'
 import Games from '../desktopShortCut/components/games'
+import WallpaperOptions from '../desktopShortCut/components/wallpaperOptions'
+import FolderWindow from '../folderWindow'
+import Notepad, { NotepadHandle } from '../notepad'
 import { Shortcut } from '../../utils/types'
-import WebProjects from '../desktopShortCut/components/webProjectcs'
 
-interface Window {
+interface OpenWindow {
   id: number
   label: string
   content: React.ReactNode
   position: { x: number; y: number }
   icon: string
+  notepadRef?: React.RefObject<NotepadHandle | null>
 }
 
-const SHORTCUTS: Shortcut[] = [
+let windowIdCounter = 100
+const nextWindowId = () => ++windowIdCounter
+
+const INITIAL_SHORTCUTS: Shortcut[] = [
   {
     id: 1,
     position: { x: 20, y: 20 },
@@ -39,7 +45,8 @@ const SHORTCUTS: Shortcut[] = [
     id: 2,
     position: { x: 20, y: 100 },
     icon: folderIcon,
-    label: 'wallpapers',
+    label: 'marllon',
+    path: 'C:\\marllon',
     content: null,
     isInFolder: false
   },
@@ -47,7 +54,8 @@ const SHORTCUTS: Shortcut[] = [
     id: 3,
     position: { x: 20, y: 180 },
     icon: folderIcon,
-    label: 'games',
+    label: 'projects',
+    path: 'C:\\marllon\\projects',
     content: null,
     isInFolder: false
   },
@@ -55,7 +63,17 @@ const SHORTCUTS: Shortcut[] = [
     id: 4,
     position: { x: 20, y: 260 },
     icon: folderIcon,
-    label: 'web projects',
+    label: 'games',
+    path: 'C:\\marllon\\games',
+    content: null,
+    isInFolder: false
+  },
+  {
+    id: 5,
+    position: { x: 20, y: 340 },
+    icon: folderIcon,
+    label: 'wallpapers',
+    path: 'C:\\marllon\\wallpapers',
     content: null,
     isInFolder: false
   }
@@ -63,6 +81,7 @@ const SHORTCUTS: Shortcut[] = [
 
 export const Monitor = () => {
   const { wallpapers, currentWallpaper, setWallpaperById } = useWallpaper()
+  const [shortcuts, setShortcuts] = useState<Shortcut[]>(INITIAL_SHORTCUTS)
   const [selectedShortcuts, setSelectedShortcuts] = useState<Set<number>>(
     new Set()
   )
@@ -72,77 +91,13 @@ export const Monitor = () => {
     width: number
     height: number
   } | null>(null)
-  const [lastWindowPosition, setLastWindowPosition] = useState({
-    x: 100,
-    y: 100
-  })
+  const [lastWindowPosition, setLastWindowPosition] = useState({ x: 80, y: 60 })
   const [isSelecting, setIsSelecting] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
-  const [openWindows, setOpenWindows] = useState<Window[]>([])
+  const [openWindows, setOpenWindows] = useState<OpenWindow[]>([])
   const [windowOrder, setWindowOrder] = useState<number[]>([])
   const [minimizedWindows, setMinimizedWindows] = useState<Set<number>>(
     new Set()
-  )
-
-  const handleDoubleClick = (shortcut: Shortcut) => {
-    if (openWindows.some((window) => window.id === shortcut.id)) {
-      const newOrder = windowOrder.filter((id) => id !== shortcut.id)
-      setWindowOrder([...newOrder, shortcut.id])
-      return
-    }
-
-    const newPosition = {
-      x: lastWindowPosition.x + 20,
-      y: lastWindowPosition.y + 20
-    }
-
-    const newWindow = {
-      id: shortcut.id,
-      label: shortcut.label,
-      content: shortcut.content,
-      position: newPosition,
-      icon: shortcut.icon
-    }
-
-    setOpenWindows((prevWindows) => {
-      if (prevWindows.some((window) => window.id === shortcut.id)) {
-        setWindowOrder((prevOrder) => {
-          const newOrder = prevOrder.filter((id) => id !== shortcut.id)
-          return [...newOrder, shortcut.id]
-        })
-        return prevWindows
-      }
-      return [...prevWindows, newWindow]
-    })
-    setWindowOrder((prevOrder) => [...prevOrder, shortcut.id])
-    setLastWindowPosition(newPosition)
-  }
-
-  const [shortcuts, setShortcuts] = useState<Shortcut[]>(() =>
-    SHORTCUTS.map((shortcut) =>
-      shortcut.label === 'wallpapers'
-        ? {
-            ...shortcut,
-            content: (
-              <WallpaperOptions
-                wallpapers={wallpapers}
-                currentWallpaperId={currentWallpaper.id}
-                onSelectWallpaper={setWallpaperById}
-              />
-            )
-          }
-        : shortcut.label === 'games'
-          ? {
-              ...shortcut,
-              content: <Games handleDoubleClick={handleDoubleClick} />
-            }
-          : shortcut.label === 'web projects'
-            ? {
-                ...shortcut,
-                content: <WebProjects handleDoubleClick={handleDoubleClick} />
-              }
-            : shortcut
-    )
   )
 
   const startPos = useRef({ x: 0, y: 0 })
@@ -152,105 +107,155 @@ export const Monitor = () => {
     {}
   )
 
-  const handleShortcutClick = (id: number, e: React.MouseEvent) => {
-    e.stopPropagation()
-    const currentTime = new Date().getTime()
-    const timeSinceLastClick = currentTime - lastClickTime.current
-    lastClickTime.current = currentTime
-
-    if (timeSinceLastClick < 300) return
-
-    if (!selectedShortcuts.has(id) && !isDragging)
-      setSelectedShortcuts(new Set([id]))
-  }
-
-  const handleShortcutStartDrag = () => {
-    setIsDragging(true)
-    initialDragPositions.current = {}
-    shortcuts.forEach((shortcut) => {
-      initialDragPositions.current[shortcut.id] = { ...shortcut.position }
+  const closeWindow = useCallback((id: number) => {
+    setOpenWindows((prev) => prev.filter((w) => w.id !== id))
+    setWindowOrder((prev) => prev.filter((wid) => wid !== id))
+    setMinimizedWindows((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
     })
-  }
+  }, [])
 
-  const handleShortcutDrag = (
-    id: number,
-    newPosition: { x: number; y: number }
-  ) => {
-    const deltaX = newPosition.x - initialDragPositions.current[id].x
-    const deltaY = newPosition.y - initialDragPositions.current[id].y
+  const updateWindowTitle = useCallback((id: number, title: string) => {
+    setOpenWindows((prev) =>
+      prev.map((w) => (w.id === id ? { ...w, label: title } : w))
+    )
+  }, [])
 
-    setShortcuts(
-      shortcuts.map((shortcut) => {
-        if (selectedShortcuts.has(shortcut.id)) {
-          return {
-            ...shortcut,
-            position: {
-              x: initialDragPositions.current[shortcut.id].x + deltaX,
-              y: initialDragPositions.current[shortcut.id].y + deltaY
-            }
-          }
-        }
-        return shortcut
-      })
+  const openNotepad = useCallback(
+    (filePath: string, fileName: string, content: string) => {
+      const id = nextWindowId()
+      const notepadRef = React.createRef<NotepadHandle>()
+
+      const newPosition = {
+        x: lastWindowPosition.x + 20,
+        y: lastWindowPosition.y + 20
+      }
+
+      const notepadNode = (
+        <Notepad
+          ref={notepadRef}
+          filePath={filePath}
+          fileName={fileName}
+          initialContent={content}
+          onTitleChange={(title) => updateWindowTitle(id, title)}
+          onRequestClose={() => closeWindow(id)}
+        />
+      )
+
+      const newWindow: OpenWindow = {
+        id,
+        label: fileName,
+        content: notepadNode,
+        position: newPosition,
+        icon: TextIcon,
+        notepadRef
+      }
+
+      setOpenWindows((prev) => [...prev, newWindow])
+      setWindowOrder((prev) => [...prev, id])
+      setLastWindowPosition(newPosition)
+    },
+    [lastWindowPosition, updateWindowTitle, closeWindow]
+  )
+
+  const customRenderers: Record<string, React.ReactNode> = {
+    'C:\\marllon\\games': (
+      <Games handleDoubleClick={handleShortcutDoubleClick} />
+    ),
+    'C:\\marllon\\wallpapers': (
+      <WallpaperOptions
+        wallpapers={wallpapers}
+        currentWallpaperId={currentWallpaper.id}
+        onSelectWallpaper={setWallpaperById}
+      />
     )
   }
+
+  function handleShortcutDoubleClick(shortcut: Shortcut) {
+    if (openWindows.some((w) => w.id === shortcut.id)) {
+      setWindowOrder((prev) => [
+        ...prev.filter((id) => id !== shortcut.id),
+        shortcut.id
+      ])
+      setMinimizedWindows((prev) => {
+        const next = new Set(prev)
+        next.delete(shortcut.id)
+        return next
+      })
+      return
+    }
+
+    const newPosition = {
+      x: lastWindowPosition.x + 20,
+      y: lastWindowPosition.y + 20
+    }
+
+    const content = shortcut.path ? (
+      <FolderWindow
+        initialPath={shortcut.path}
+        customRenderers={customRenderers}
+        onOpenFile={openNotepad}
+      />
+    ) : (
+      shortcut.content
+    )
+
+    const newWindow: OpenWindow = {
+      id: shortcut.id,
+      label: shortcut.label,
+      content,
+      position: newPosition,
+      icon: shortcut.icon
+    }
+
+    setOpenWindows((prev) => [...prev, newWindow])
+    setWindowOrder((prev) => [...prev, shortcut.id])
+    setLastWindowPosition(newPosition)
+  }
+
+  const isWithinBox = (
+    pos: { x: number; y: number },
+    box: { left: number; top: number; width: number; height: number }
+  ) =>
+    pos.x >= box.left &&
+    pos.x <= box.left + box.width &&
+    pos.y >= box.top &&
+    pos.y <= box.top + box.height
 
   const updateSelectionBox = useCallback(
     (e: MouseEvent) => {
       if (!isSelecting || !contentRef.current || isDragging) return
-
       const rect = contentRef.current.getBoundingClientRect()
-      const currentX = e.clientX - rect.left
-      const currentY = e.clientY - rect.top
-
-      const left = Math.min(startPos.current.x, currentX)
-      const top = Math.min(startPos.current.y, currentY)
-      const width = Math.abs(currentX - startPos.current.x)
-      const height = Math.abs(currentY - startPos.current.y)
-
+      const cx = e.clientX - rect.left
+      const cy = e.clientY - rect.top
+      const left = Math.min(startPos.current.x, cx)
+      const top = Math.min(startPos.current.y, cy)
+      const width = Math.abs(cx - startPos.current.x)
+      const height = Math.abs(cy - startPos.current.y)
       setSelectionBox({ left, top, width, height })
-
       const newSelected = new Set<number>()
-      shortcuts.forEach((shortcut) => {
-        if (
-          isWithinSelectionBox(shortcut.position, { left, top, width, height })
-        ) {
-          newSelected.add(shortcut.id)
-        }
+      shortcuts.forEach((s) => {
+        if (isWithinBox(s.position, { left, top, width, height }))
+          newSelected.add(s.id)
       })
       setSelectedShortcuts(newSelected)
     },
     [isSelecting, shortcuts, isDragging]
   )
 
-  const isWithinSelectionBox = (
-    position: { x: number; y: number },
-    box: { left: number; top: number; width: number; height: number }
-  ) => {
-    return (
-      position.x >= box.left &&
-      position.x <= box.left + box.width &&
-      position.y >= box.top &&
-      position.y <= box.top + box.height
-    )
-  }
-
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.target === contentRef.current) {
       const rect = contentRef.current.getBoundingClientRect()
-      startPos.current = {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top
-      }
+      startPos.current = { x: e.clientX - rect.left, y: e.clientY - rect.top }
       setIsSelecting(true)
       setSelectedShortcuts(new Set())
     }
   }
 
   const handleMouseMove = useCallback(
-    (e: React.MouseEvent) => {
-      updateSelectionBox(e.nativeEvent)
-    },
+    (e: React.MouseEvent) => updateSelectionBox(e.nativeEvent),
     [updateSelectionBox]
   )
 
@@ -261,34 +266,63 @@ export const Monitor = () => {
     initialDragPositions.current = {}
   }
 
-  const handleWindowClick = (id: number) => {
-    setWindowOrder((prevOrder) => {
-      const newOrder = prevOrder.filter((windowId) => windowId !== id)
-      return [...newOrder, id]
+  const handleShortcutClick = (id: number, e: React.MouseEvent) => {
+    e.stopPropagation()
+    const now = Date.now()
+    if (now - lastClickTime.current < 300) return
+    lastClickTime.current = now
+    if (!selectedShortcuts.has(id) && !isDragging)
+      setSelectedShortcuts(new Set([id]))
+  }
+
+  const handleShortcutStartDrag = () => {
+    setIsDragging(true)
+    initialDragPositions.current = {}
+    shortcuts.forEach((s) => {
+      initialDragPositions.current[s.id] = { ...s.position }
     })
-    setMinimizedWindows((prevMinimized) => {
-      const newMinimized = new Set(prevMinimized)
-      newMinimized.delete(id)
-      return newMinimized
+  }
+
+  const handleShortcutDrag = (
+    id: number,
+    newPosition: { x: number; y: number }
+  ) => {
+    const dx = newPosition.x - initialDragPositions.current[id].x
+    const dy = newPosition.y - initialDragPositions.current[id].y
+    setShortcuts(
+      shortcuts.map((s) =>
+        selectedShortcuts.has(s.id)
+          ? {
+              ...s,
+              position: {
+                x: initialDragPositions.current[s.id].x + dx,
+                y: initialDragPositions.current[s.id].y + dy
+              }
+            }
+          : s
+      )
+    )
+  }
+
+  const handleWindowClick = (id: number) => {
+    setWindowOrder((prev) => [...prev.filter((wid) => wid !== id), id])
+    setMinimizedWindows((prev) => {
+      const next = new Set(prev)
+      next.delete(id)
+      return next
     })
   }
 
   const handleMinimizeClick = (id: number) => {
-    setMinimizedWindows((prevMinimized) => new Set(prevMinimized).add(id))
+    setMinimizedWindows((prev) => new Set(prev).add(id))
   }
 
-  const handleCloseClick = (id: number) => {
-    setOpenWindows((prevWindows) =>
-      prevWindows.filter((window) => window.id !== id)
-    )
-    setWindowOrder((prevOrder) =>
-      prevOrder.filter((windowId) => windowId !== id)
-    )
-    setMinimizedWindows((prevMinimized) => {
-      const newMinimized = new Set(prevMinimized)
-      newMinimized.delete(id)
-      return newMinimized
-    })
+  const handleBeforeClose = (window: OpenWindow) => {
+    if (window.notepadRef?.current) {
+      window.notepadRef.current.requestClose()
+    } else {
+      closeWindow(window.id)
+    }
   }
 
   return (
@@ -308,14 +342,13 @@ export const Monitor = () => {
             label={shortcut.label}
             selected={selectedShortcuts.has(shortcut.id)}
             onClick={(e) => handleShortcutClick(shortcut.id, e)}
-            onStartDrag={() => handleShortcutStartDrag()}
-            onDrag={(newPosition) =>
-              handleShortcutDrag(shortcut.id, newPosition)
-            }
-            onDoubleClick={() => handleDoubleClick(shortcut)}
+            onStartDrag={handleShortcutStartDrag}
+            onDrag={(pos) => handleShortcutDrag(shortcut.id, pos)}
+            onDoubleClick={() => handleShortcutDoubleClick(shortcut)}
             isInFolder={shortcut.isInFolder}
           />
         ))}
+
         {isSelecting && selectionBox && (
           <SelectionBox
             style={{
@@ -326,6 +359,7 @@ export const Monitor = () => {
             }}
           />
         )}
+
         {openWindows.map((window) => (
           <GenericWindow
             key={window.id}
@@ -338,28 +372,20 @@ export const Monitor = () => {
               display: minimizedWindows.has(window.id) ? 'none' : 'block'
             }}
             onMinimize={() => handleMinimizeClick(window.id)}
-            onClose={() => handleCloseClick(window.id)}
+            onClose={() => closeWindow(window.id)}
+            onBeforeClose={() => handleBeforeClose(window)}
           >
-            {window.label === 'wallpapers' ? (
-              <WallpaperOptions
-                wallpapers={wallpapers}
-                currentWallpaperId={currentWallpaper.id}
-                onSelectWallpaper={setWallpaperById}
-              />
-            ) : (
-              window.content
-            )}
+            {window.content}
           </GenericWindow>
         ))}
+
         <Taskbar
-          openWindows={openWindows.map((window) => ({
-            id: window.id,
-            title: window.label,
-            icon: window.icon
+          openWindows={openWindows.map((w) => ({
+            id: w.id,
+            title: w.label,
+            icon: w.icon
           }))}
-          onWindowsButtonClick={() => {
-            console.log('clicked')
-          }}
+          onWindowsButtonClick={() => console.log('start clicked')}
           onTaskClick={handleWindowClick}
         />
       </Content>
